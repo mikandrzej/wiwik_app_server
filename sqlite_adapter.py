@@ -1,7 +1,7 @@
 import sqlite3
 from flask import g
 
-DATABASE = 'wiwik_db.db'
+DATABASE = 'db/wiwik_db.db'
 
 
 def make_dicts(cursor, row):
@@ -43,28 +43,45 @@ def select_vehicles():
 
     query = "SELECT * FROM vehicles"
     vehicles = database.execute(query).fetchall()
-    print(vehicles)
     return vehicles
 
 
-def select_vehicles_measurements(vehicles, timestamp_from, timestamp_to):
+def select_vehicles_measurements(vehicles, timestamp_from, timestamp_to, types):
     database = get_database()
 
-    query = "SELECT * FROM measures LEFT JOIN devices ON measures.device_id = devices.device_id"
+    query = "SELECT * FROM measures " \
+            "LEFT JOIN devices ON measures.device_id = devices.device_id " \
+            "LEFT JOIN vehicles ON devices.vehicle_id = vehicles.vehicle_id"
 
     filters = []
     if len(vehicles) > 0:
         veh_string = ",".join(vehicles)
-        filters.append(f"vehicle_id IN ({veh_string})")
+        filters.append(f"vehicles.vehicle_id IN ({veh_string})")
     if timestamp_from is not None:
-        filters.append(f"measure_timestamp > {timestamp_from}")
+        filters.append(f"measures.measure_timestamp > {timestamp_from}")
     if timestamp_to is not None:
-        filters.append(f"measure_timestamp > {timestamp_to}")
+        filters.append(f"measures.measure_timestamp < {timestamp_to}")
+    if len(types) > 0:
+        types = ["\"" + x + "\"" for x in types]
+        meas_type_string = ",".join(types)
+        filters.append(f"measures.measure_type IN ({meas_type_string})")
 
     if len(filters) > 0:
         query += " WHERE "
         query += " AND ".join(filters)
 
     measurements = database.execute(query).fetchall()
-    print(measurements)
     return measurements
+
+
+def select_vehicle_id_from_device_id(device_id):
+    database = get_database()
+    cursor = database.cursor()
+
+    query = f"SELECT devices.vehicle_id FROM devices WHERE devices.device_id IS \"{device_id}\" LIMIT 1"
+
+    result = cursor.execute(query).fetchone()
+
+    if "vehicle_id" in result:
+        return result['vehicle_id']
+    return None

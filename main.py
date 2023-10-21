@@ -3,6 +3,7 @@ import time
 from flask import Flask, jsonify, request
 from flask_mqtt import Mqtt
 import sqlite_adapter as db
+import json
 
 app = Flask(__name__)
 
@@ -13,7 +14,9 @@ app.config['MQTT_PASSWORD'] = ''  # Set this item when you need to verify userna
 app.config['MQTT_KEEPALIVE'] = 5  # Set KeepAlive time in seconds
 app.config['MQTT_TLS_ENABLED'] = False  # If your server supports TLS, set it True
 
-topic = 'measures/#'
+measures_topic = 'measures/#'
+
+vehicles_topic = 'vehicles/'
 
 mqtt_client = Mqtt(app)
 
@@ -27,7 +30,7 @@ def close_connection(exception):
 def handle_connect(client, userdata, flags, rc):
     if rc == 0:
         print('Connected successfully')
-        mqtt_client.subscribe(topic) # subscribe topic
+        mqtt_client.subscribe(measures_topic) # subscribe topic
     else:
         print('Bad connection. Code:', rc)
 
@@ -38,6 +41,12 @@ def handle_mqtt_irvine_measure(device_id, user, measure_type, value):
     timestamp = int(time.time())
     with app.app_context():
         db.insert_measure(timestamp=timestamp, meas_type=measure_type, device_id=device_id, value=value)
+
+    if measure_type == "temperature1":
+        # todo get vehicle id based on device id
+        veh_id = get_vehicle_id_from_device_id(device_id)
+        if veh_id is not None:
+            publish_vehicle_irvine_data(timestamp, veh_id, value)
 
 
 def handle_mqtt_measures_topic(spl_topic, message):
@@ -50,6 +59,23 @@ def handle_mqtt_measures_topic(spl_topic, message):
         handle_mqtt_irvine_measure(device_id, user, measure_type, message)
     else:
         print("Unknown device type " + device_type)
+
+
+def publish_vehicle_irvine_data(timestamp, vehicle_id, temperature):
+    data = {
+        "timestamp": timestamp,
+        # "vehicle_id": vehicle_id,
+        "temperature": float(temperature)
+    }
+    data_json = json.dumps(data)
+    topic = vehicles_topic + str(vehicle_id) + "/irvine"
+    mqtt_client.publish(topic, data_json, retain=True)
+
+
+def get_vehicle_id_from_device_id(device_id):
+    with app.app_context():
+        vehicle_id = db.select_vehicle_id_from_device_id(device_id)
+        return vehicle_id
 
 
 @mqtt_client.on_message()
@@ -75,18 +101,21 @@ def api_get_vehicles():
     return jsonify(vehicles)
 
 
-@app.route("/api/getVehiclesMeasurements")
-def api_get_vehicles_measurements():
+@app.route("/api/getVehicleTempData")
+def api_get_vehicle_temp_data():
     args = request.args.to_dict()
     vehicles = args.get("vehicles")
     if vehicles is not None:
         vehicles = vehicles.split(",")
+    else:
+        vehicles = []
 
-    measurements = db.select_vehicles_measurements(vehicles=vehicles,
-                                    timestamp_from=args.get("timestamp_from"),
-                                    timestamp_to=args.get("timestamp_to"))
+    temperatures = db.select_vehicles_measurements(vehicles=vehicles,
+                                    timestamp_from=args.get("dateFrom"),
+                                    timestamp_to=args.get("dateTo"),
+                                    types=["temperature1"])
 
-    return jsonify(measurements)
+    return jsonify(temperatures)
 
 
 
