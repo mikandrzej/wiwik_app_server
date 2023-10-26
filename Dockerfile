@@ -21,17 +21,17 @@ FROM python:3.11
 
 WORKDIR /usr/src/app
 
-VOLUME db
-
 COPY requrements.txt ./
 RUN pip install -r requrements.txt
 
+VOLUME "db"
+
 COPY main.py ./
 COPY sqlite_adapter.py ./
-COPY wiwik_db.db ./db/
+COPY irvine.py ./
+COPY create_db.sql ./
 
 EXPOSE 5000/tcp
 
-VOLUME ".db"
 
 CMD [ "python3", "./main.py"]
