@@ -18,8 +18,9 @@ app.config['MQTT_KEEPALIVE'] = 5  # Set KeepAlive time in seconds
 app.config['MQTT_TLS_ENABLED'] = False  # If your server supports TLS, set it True
 
 irvine_topic = 'irvine/#'
-
 vehicles_topic = 'vehicles/'
+broker_uptime_topic = "$SYS/broker/uptime"
+server_topic = "server/"
 
 mqtt_client = Mqtt(app)
 
@@ -36,8 +37,20 @@ def handle_connect(client, userdata, flags, rc):
     if rc == 0:
         print('MQTT Connected successfully')
         mqtt_client.subscribe(irvine_topic, 2)  # subscribe topic
+        mqtt_client.subscribe(broker_uptime_topic)  # subscribe topic
     else:
         print('Bad connection. Code:', rc)
+
+
+def handle_mqtt_sys_topic(spl_topic, message):
+    if spl_topic[0] != "broker":
+        return
+    if spl_topic[1] != "uptime":
+        return
+
+    print("server uptime: " + message)
+    uptime = int(time.time() - app_start_time)
+    mqtt_client.publish(server_topic + "uptime", uptime)
 
 
 def handle_mqtt_irvine_topic(spl_topic, message):
@@ -110,21 +123,14 @@ def send_irvine_data_to_mqtt(data: IrvineData):
 
 
 def send_irvine_data_to_db(data: IrvineData):
-    pass
+    for measure in data.measures:
+        timestamp = measure.timestamp
+        m_type = measure.meas_type
+        dev_id = measure.irvine_id
+        val = measure.value
 
-
-# def handle_mqtt_irvine_measure(device_id, user, measure_type, value):
-#     print(f"Got irvine measure from user {user} and device_id {device_id}. "
-#           f"Measure type: {measure_type} with value: {value}")
-#     timestamp = int(time.time())
-#     with app.app_context():
-#         db.insert_measure(timestamp=timestamp, meas_type=measure_type, device_id=device_id, value=value)
-#
-#     if measure_type == "temperature1":
-#         # todo get vehicle id based on device id
-#         veh_id = get_vehicle_id_from_device_id(device_id)
-#         if veh_id is not None:
-#             publish_vehicle_irvine_data(timestamp, veh_id, value)
+    with app.app_context():
+        db.insert_measure(timestamp=timestamp, meas_type=m_type, device_id=dev_id, value=val)
 
 
 def get_vehicle_id_from_device_id(device_id):
@@ -135,13 +141,15 @@ def get_vehicle_id_from_device_id(device_id):
 
 @mqtt_client.on_message()
 def handle_mqtt_message(client, userdata, message):
-    print("mqtt message: " + message.topic + message.payload.decode())
+    print("mqtt message: " + message.topic + " "+ message.payload.decode())
     topic = message.topic.split("/")
     root_type = topic[0]
     payload = message.payload.decode()
 
     if root_type == "irvine":
         handle_mqtt_irvine_topic(topic[1:], payload)
+    elif root_type == "$SYS":
+        handle_mqtt_sys_topic(topic[1:], payload)
     else:
         print("Unknown Mqtt root type")
 
@@ -159,18 +167,15 @@ def api_get_vehicles():
 
 @app.route("/api/getVehicleTempData")
 def api_get_vehicle_temp_data():
+    start_time = time.time() * 1000
     args = request.args.to_dict()
-    vehicles = args.get("vehicles")
-    if vehicles is not None:
-        vehicles = vehicles.split(",")
-    else:
-        vehicles = []
+    vehicle_id = args.get("vehicle_id")
 
-    temperatures = db.select_vehicles_measurements(vehicles=vehicles,
-                                                   timestamp_from=args.get("dateFrom"),
-                                                   timestamp_to=args.get("dateTo"),
-                                                   types=["temperature1"])
-
+    temperatures = db.select_vehicles_measurements(vehicle_id=vehicle_id,
+                                                   date=args.get("date"),
+                                                   meas_type="temperature1")
+    end_time = time.time() * 1000
+    print("getVehicleTempData took " + str(end_time - start_time) + "ms")
     return jsonify(temperatures)
 
 

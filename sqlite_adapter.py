@@ -3,10 +3,8 @@ from flask import g
 from sqlite3 import Error
 import os
 
-DATABASE = 'db\\wiwik_db.db'
+DATABASE = '/db/wiwik_db.db'
 DATABASE_INIT_SCRIPT = 'create_db.sql'
-
-
 
 
 def make_dicts(cursor, row):
@@ -25,6 +23,8 @@ def get_database():
 
 
 def connect_database():
+    if not os.path.exists(DATABASE):
+        return None
     database = None
     try:
         database = sqlite3.connect(DATABASE)
@@ -37,6 +37,7 @@ def connect_database():
 def create_database():
     database = None
     db_directory = os.path.dirname(DATABASE)
+    print("creating database file")
     if not os.path.exists(db_directory):
         os.makedirs(db_directory)
         print("database folder created")
@@ -54,6 +55,7 @@ def create_database():
             database.close()
     return database
 
+
 def close_database():
     database = getattr(g, '_database', None)
     if database is not None:
@@ -63,15 +65,15 @@ def close_database():
 def insert_measure(timestamp, meas_type, device_id, value):
     database = get_database()
     cursor = database.cursor()
-    # query = f"INSERT INTO measures (measure_timestamp, measure_type, measure_value, device_id) " \
-    #         f'VALUES ({timestamp}, "{meas_type}", {value}, "{device_id}")'
-    # cursor.execute(query)
 
     query = f"INSERT INTO measures (measure_timestamp, measure_type, measure_value, device_id) " \
             f'VALUES (?, ?, ?, ?)'
     cursor.execute(query, [timestamp, meas_type, value, device_id])
-    cursor.close()
+    query = f"INSERT OR IGNORE INTO devices (device_id, device_type) " \
+            f'VALUES (?, ?)'
+    cursor.execute(query, [device_id, "irvine"])
 
+    cursor.close()
     database.commit()
 
 
@@ -91,31 +93,20 @@ def select_devices():
     return devices
 
 
-def select_vehicles_measurements(vehicles, timestamp_from, timestamp_to, types):
+def select_vehicles_measurements(vehicle_id, date, meas_type):
     database = get_database()
 
-    query = "SELECT * FROM measures " \
+    query = "SELECT measure_timestamp, measure_value FROM measures " \
             "LEFT JOIN devices ON measures.device_id = devices.device_id " \
-            "LEFT JOIN vehicles ON devices.vehicle_id = vehicles.vehicle_id"
-
-    filters = []
-    if len(vehicles) > 0:
-        veh_string = ",".join(vehicles)
-        filters.append(f"vehicles.vehicle_id IN ({veh_string})")
-    if timestamp_from is not None:
-        filters.append(f"measures.measure_timestamp > {timestamp_from}")
-    if timestamp_to is not None:
-        filters.append(f"measures.measure_timestamp < {timestamp_to}")
-    if len(types) > 0:
-        types = ["\"" + x + "\"" for x in types]
-        meas_type_string = ",".join(types)
-        filters.append(f"measures.measure_type IN ({meas_type_string})")
-
-    if len(filters) > 0:
-        query += " WHERE "
-        query += " AND ".join(filters)
-
-    measurements = database.execute(query).fetchall()
+            "LEFT JOIN vehicles ON devices.vehicle_id = vehicles.vehicle_id " \
+            "WHERE devices.vehicle_id IS (?) " \
+            "AND measure_type IS (?)" \
+            "AND measure_timestamp >= (?) " \
+            "AND measure_timestamp <= (?) " \
+            "ORDER BY measure_timestamp ASC"
+    start_date = int(date)
+    end_date = int(date) + 60 * 60 * 24  # end of day
+    measurements = database.execute(query, [vehicle_id, meas_type, start_date, end_date]).fetchall()
     return measurements
 
 
