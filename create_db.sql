@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS "devices" (
 DROP TABLE IF EXISTS "vehicles";
 CREATE TABLE IF NOT EXISTS "vehicles" (
 	"vehicle_id"	INTEGER NOT NULL UNIQUE,
-	"vehicle_name"	TEXT NOT NULL,
+	"vehicle_name"	TEXT NOT NULL UNIQUE,
 	"vehicle_plate"	TEXT,
 	PRIMARY KEY("vehicle_id" AUTOINCREMENT)
 );

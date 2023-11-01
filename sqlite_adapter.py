@@ -3,7 +3,7 @@ from flask import g
 from sqlite3 import Error
 import os
 
-DATABASE = '/db/wiwik_db.db'
+DATABASE = 'db/wiwik_db.db'
 DATABASE_INIT_SCRIPT = 'create_db.sql'
 
 
@@ -124,7 +124,7 @@ def select_vehicle_id_from_device_id(device_id):
     return None
 
 
-def assign_device_to_vehicle(irvine_id, vehicle_id, user_id) -> object:
+def assign_device_to_vehicle(irvine_id, vehicle_id, user_id) -> bool:
     result = False
     database = get_database()
     cursor = database.cursor()
@@ -140,6 +140,25 @@ def assign_device_to_vehicle(irvine_id, vehicle_id, user_id) -> object:
     try:
         cursor.execute(query, [irvine_id, device_type, vehicle_id, user_id])
         result = True
+    finally:
+        cursor.close()
+        database.commit()
+    return result
+
+
+def add_vehicle(veh_name, plate_no, user_id) -> bool:
+    result = False
+
+    query = f"INSERT INTO vehicles (vehicle_name, vehicle_plate) " \
+            f'VALUES (?, ?)'
+
+    database = get_database()
+    cursor = database.cursor()
+    try:
+        res = cursor.execute(query, [veh_name, plate_no])
+        result = True
+    except Error:
+        pass
     finally:
         cursor.close()
         database.commit()

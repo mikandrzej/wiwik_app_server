@@ -165,6 +165,20 @@ def api_get_vehicles():
     return jsonify(vehicles)
 
 
+@app.route("/api/addVehicle")
+def api_add_vehicle():
+    args = request.args.to_dict()
+    vehicle_name = args.get("veh_name")
+    plate_no = args.get("plate_no")
+    user_id = args.get("user_id")
+
+    if db.add_vehicle(vehicle_name, plate_no, user_id):
+        return "Success", 200
+    else:
+        return "Commit to db error", 400
+
+
+
 @app.route("/api/getVehicleTempData")
 def api_get_vehicle_temp_data():
     start_time = time.time() * 1000

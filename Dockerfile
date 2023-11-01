@@ -19,17 +19,17 @@
 
 FROM python:3.11
 
-WORKDIR /usr/src/app
+WORKDIR /
 
 COPY requrements.txt ./
 RUN pip install -r requrements.txt
 
 VOLUME "db"
 
-COPY main.py ./
-COPY sqlite_adapter.py ./
-COPY irvine.py ./
-COPY create_db.sql ./
+COPY main.py /
+COPY sqlite_adapter.py /
+COPY irvine.py /
+COPY create_db.sql /
 
 EXPOSE 5000/tcp
 
