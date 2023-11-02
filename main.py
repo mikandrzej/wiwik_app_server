@@ -1,5 +1,6 @@
 import sched
 import time
+from enum import Enum
 
 from flask import Flask, jsonify, request
 from flask_mqtt import Mqtt
@@ -65,8 +66,22 @@ def handle_mqtt_irvine_topic(spl_topic, message):
         json_data = json.loads(message)
         timestamp = json_data["timestamp"]
         value = json_data["temperature1"]
+    elif measure_type == "gps":
+        json_data = json.loads(message)
+        timestamp = json_data["timestamp"]
+        # value = json_data["gps"]
+        value = reparseGpsData(json_data["gps"])
+        if value is not None:
+            value = json.dumps(value)
+    elif measure_type == "service":
+        json_data = json.loads(message)
+        timestamp = json_data["timestamp"]
+        value = json_data["modem_name"] + " / " + json_data["modem_info"]
     else:
         print(f"Unknown irvine measure: {measure_type}")
+        return
+    if value is None:
+        print("Failed to parse value: " + message)
         return
 
     timestamp = convert_datetime_string_to_since_epoch(timestamp)
@@ -80,6 +95,60 @@ def handle_mqtt_irvine_topic(spl_topic, message):
     # send to database
     send_irvine_data_to_db(irvine_data)
 
+def parse_gps_timestamp(input: str):
+    timestamp = datetime.strptime(input, '%d%m%y%H%M%S.00')
+
+    # Adjust the datetime object based on the offset
+    timestamp_epoch = (timestamp - datetime(1970, 1, 1)).total_seconds()
+    return int(timestamp_epoch)
+
+
+def reparseGpsData(data: str):
+    gpsFields = Enum("GpsFields", [
+        'FIX_MODE',
+        'GPS_SATS',
+        'GLONASS_SATS',
+        'BEIDOU_SATS',
+        'UNKNOWN',
+        'LATITUDE',
+        'NS',
+        'LONGITUDE',
+        'EW',
+        'DAY',
+        'TIME',
+        'ALTITUDE',
+        'SPEED',
+        'COURSE',
+        'REPORT_CYCLE',
+        'PRECISION',
+        'HOR_PRECISION',
+        'VERT_PRECISION'])
+    gps_data = [""] + data.split(',') # enum is counted from 1
+    try:
+        latitude = float(gps_data[gpsFields.LATITUDE.value])
+        if gps_data[gpsFields.NS.value] == "S":
+            latitude *= -1
+        longitude = float(gps_data[gpsFields.LONGITUDE.value])
+        if gps_data[gpsFields.EW.value] == "W":
+            longitude *= -1
+        timestamp = gps_data[gpsFields.DAY.value] + gps_data[gpsFields.TIME.value]
+        timestamp = parse_gps_timestamp(timestamp)
+        result = {
+            "fix_mode": gps_data[gpsFields.FIX_MODE.value],
+            "satellites": gps_data[gpsFields.GPS_SATS.value],
+            "latitude": latitude,
+            "longitude": longitude,
+            "speed": float(gps_data[gpsFields.SPEED.value]) * 1.852, #to kph
+            "precision": float(gps_data[gpsFields.PRECISION.value]),
+            "gps_timestamp": timestamp
+        }
+        return result
+    except ValueError as e:
+        print(str(e) + " for data: " + data)
+    except IndexError as e:
+        print(str(e) + " for data: " + data)
+    return None
+
 
 def convert_datetime_string_to_since_epoch(string: str):
     # Parse the offset from the input string
@@ -92,34 +161,44 @@ def convert_datetime_string_to_since_epoch(string: str):
     timestamp = timestamp - timedelta(hours=offset_hours)
     timestamp_epoch = (timestamp - datetime(1970, 1, 1)).total_seconds()
 
-    return timestamp_epoch
+    return int(timestamp_epoch)
 
 
 def send_irvine_data_to_mqtt(data: IrvineData):
     for measure in data.measures:
-        vehicle_id = get_vehicle_id_from_device_id(measure.irvine_id)
-        if vehicle_id is None:
-            print(f"Irvine ID {measure.irvine_id} not assigned to vehicle")
-            continue
-        topic = vehicles_topic + str(vehicle_id)
-        if measure.meas_type == "temperature1":
-            topic = topic + "/irvine_temperature1"
-            data = {
-                "timestamp": measure.timestamp,
-                "value": float(measure.value)
-            }
-        elif measure.meas_type == "battery":
-            topic = topic + "/irvine_battery"
-            data = {
-                "timestamp": measure.timestamp,
-                "value": float(measure.value)
-            }
-        else:
-            print("unknown measure type")
-            continue
+        try:
+            vehicle_id = get_vehicle_id_from_device_id(measure.irvine_id)
+            if vehicle_id is None:
+                print(f"Irvine ID {measure.irvine_id} not assigned to vehicle")
+                continue
+            topic = vehicles_topic + str(vehicle_id)
+            if measure.meas_type == "temperature1":
+                topic = topic + "/irvine_temperature1"
+                data = {
+                    "timestamp": measure.timestamp,
+                    "value": float(measure.value)
+                }
+            elif measure.meas_type == "battery":
+                topic = topic + "/irvine_battery"
+                data = {
+                    "timestamp": measure.timestamp,
+                    "value": float(measure.value)
+                }
+            elif measure.meas_type == "gps":
+                topic = topic + "/gps"
+                json_data = json.loads(measure.value)
+                data = {
+                    "timestamp": measure.timestamp
+                }
+                data.update(json_data)
+            else:
+                print("unknown measure type")
+                continue
 
-        data_json = json.dumps(data)
-        mqtt_client.publish(topic, data_json, retain=True)
+            data_json = json.dumps(data)
+            mqtt_client.publish(topic, data_json, retain=True)
+        finally:
+            pass
 
 
 def send_irvine_data_to_db(data: IrvineData):
